@@ -90,8 +90,6 @@ class VPG(BaseModel):
             
             
     def train_model(self):
-        """Train the model."""
-        
         step_num = 0
         for epoch in range(self.num_epochs):
             t0 = time.time()
@@ -119,11 +117,8 @@ class VPG(BaseModel):
             if epoch % self.eval_interval == 0:
                 self.eval_model()
 
-
     @torch.no_grad()
     def eval_model(self, save=True):
-        """Test the model."""
-
         print("="*100)
         print("Testing model...".center(100))
         print("="*100)

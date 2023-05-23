@@ -1,6 +1,8 @@
-import torch.nn as nn
+import torch
+from abc import ABC, abstractmethod
 
-class BaseModel(nn.Module):
+# Abstract Base Class for all models
+class BaseModel(torch.nn.Module, ABC):
 
     def __init__(self, config, env):
         super(BaseModel, self).__init__()
@@ -16,3 +18,23 @@ class BaseModel(nn.Module):
         self.n_actions = env.action_space.n
 
         self.best_reward = -float('inf')
+
+    @abstractmethod
+    def train_model(self):
+        """Train the model."""
+        pass
+
+    @abstractmethod
+    def eval_model(self, save=True):
+        """Evaluate the model."""
+        pass
+    
+    @abstractmethod
+    def save(self):
+        """ Save model parameters """
+        pass
+
+    @abstractmethod
+    def load(self, checkpoint):
+        """ Load model parameters """
+        pass
