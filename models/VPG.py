@@ -43,9 +43,9 @@ class VPG(BaseModel):
         state = torch.tensor(state, dtype=torch.float32, device=self.device)
         return self.sample_policy(state).sample().item()
 
-    def compute_loss(self, state, action, weights):
+    def compute_loss(self, state, action, rewards_to_go):
         log_prob = self.sample_policy(state).log_prob(action)
-        return -(log_prob * weights).mean()
+        return -(log_prob * rewards_to_go).mean() # negative to perform gradient ascent
 
     def reward_to_go(self, rews):
         n = len(rews)
@@ -57,7 +57,7 @@ class VPG(BaseModel):
     def sample_batch_from_env(self):
         """ Sample a batch of trajectories from the environment. """
 
-        batch_states, batch_actions, batch_weights, batch_returns, batch_lengths = [], [], [], [], []
+        batch_states, batch_actions, batch_rewards_to_go, batch_returns, batch_lengths = [], [], [], [], []
         ep_rews = []
         state, _ = self.env.reset()
         while True:
@@ -78,7 +78,7 @@ class VPG(BaseModel):
                 batch_returns.append(ep_ret)
                 batch_lengths.append(ep_len)
 
-                batch_weights += self.reward_to_go(ep_rews).tolist()
+                batch_rewards_to_go += self.reward_to_go(ep_rews).tolist()
 
                 state, _ = self.env.reset()
                 ep_rews = []
@@ -86,7 +86,7 @@ class VPG(BaseModel):
                 # end experience loop if we have enough of it
                 if len(batch_states) > self.batch_size:
                     break
-        return np.array(batch_states), np.array(batch_actions), np.array(batch_weights), batch_returns, batch_lengths
+        return np.array(batch_states), np.array(batch_actions), np.array(batch_rewards_to_go), batch_returns, batch_lengths
             
             
     def train_model(self):
@@ -96,11 +96,11 @@ class VPG(BaseModel):
         for epoch in range(self.num_epochs):
             t0 = time.time()
 
-            batch_states, batch_actions, batch_weights, batch_returns, batch_lengths = self.sample_batch_from_env()
+            batch_states, batch_actions, batch_rewards_to_go, batch_returns, batch_lengths = self.sample_batch_from_env()
 
             loss = self.compute_loss(torch.as_tensor(batch_states, device=self.device), 
                                      torch.as_tensor(batch_actions, device=self.device), 
-                                     torch.as_tensor(batch_weights, device=self.device)
+                                     torch.as_tensor(batch_rewards_to_go, device=self.device)
             )
 
             self.optimizer.zero_grad()
@@ -131,11 +131,11 @@ class VPG(BaseModel):
         for epoch in range(self.eval_episodes):
             t0 = time.time()
 
-            batch_states, batch_actions, batch_weights, batch_returns, batch_lengths = self.sample_batch_from_env()
+            batch_states, batch_actions, batch_rewards_to_go, batch_returns, batch_lengths = self.sample_batch_from_env()
             
             loss = self.compute_loss(torch.tensor(batch_states, device=self.device), 
                                      torch.tensor(batch_actions, device=self.device), 
-                                     torch.tensor(batch_weights, device=self.device)
+                                     torch.tensor(batch_rewards_to_go, device=self.device)
             )
         
             # timing and logging
