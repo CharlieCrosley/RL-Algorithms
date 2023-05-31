@@ -1,6 +1,6 @@
 """
 
-Implementation of Vanilla Policy Gradient (VPG) algorithm.
+Vanilla Policy Gradient (VPG)
 
 """
 
@@ -11,8 +11,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.distributions import Categorical
-from models.BaseModel import BaseModel
-from utils import init_weights
+from models.shared.base_model import BaseModel
+from models.shared.utils import init_weights
 
 
 class VPG(BaseModel):
@@ -48,6 +48,7 @@ class VPG(BaseModel):
         return -(log_prob * rewards_to_go).mean() # negative to perform gradient ascent
 
     def reward_to_go(self, rews):
+        """ Calculate the reward-to-go which only includes present and future rewards. """
         n = len(rews)
         rtgs = torch.zeros_like(torch.tensor(rews), device=self.device, dtype=torch.float32)
         for i in reversed(range(n)):
@@ -90,6 +91,7 @@ class VPG(BaseModel):
             
             
     def train_model(self):
+        print(self.training)
         step_num = 0
         for epoch in range(self.num_epochs):
             t0 = time.time()

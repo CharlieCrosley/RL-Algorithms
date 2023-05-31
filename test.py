@@ -1,7 +1,7 @@
 import torch
 import gymnasium as gym
 from configurator import get_config
-from utils import get_model_obj
+from models.shared.utils import get_model_obj
 import sys 
 import os
 

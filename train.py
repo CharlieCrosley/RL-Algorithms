@@ -1,20 +1,22 @@
 import torch
 import gymnasium as gym
-from gymnasium.wrappers import FrameStack
-from utils import get_model_obj
+from gymnasium.wrappers import FrameStack, NormalizeObservation
+from models.shared.utils import get_model_obj
 import os
 from configurator import get_config
 
 
 config = get_config()
 
-env = gym.make(config.env_name, render_mode="human")
+env = gym.make(config.env_name) #, render_mode="human"
+env = NormalizeObservation(env) # very important!
 #env = FrameStack(env, num_stack=n_frame_stack)
 
 seed = 0
 os.makedirs(config.out_dir, exist_ok=True)
 torch.manual_seed(seed)
 env.action_space.seed(seed)
+env.observation_space.seed(seed)
 torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
 torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
 
@@ -38,11 +40,6 @@ elif config.init_from == 'resume':
 if config.compile:
     print("compiling the model... (takes a ~minute)")
     model = torch.compile(model) # requires PyTorch 2.0
-
-# logging
-if config.wandb_log:
-    import wandb
-    wandb.init(project=config.wandb_project, name=config.wandb_run_name, config=config)
 
 model.train_model()
 

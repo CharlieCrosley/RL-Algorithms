@@ -26,5 +26,5 @@ def get_config():
     # Print the config
     for k, v in config.__dict__.items():
         print(f"{k} = {v}")
-
+    print("="*100) # separator for readability
     return config

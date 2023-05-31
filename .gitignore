@@ -162,3 +162,5 @@ cython_debug/
 # Misc project files
 dev.ipynb
 model.pt
+output/
+wandb/
