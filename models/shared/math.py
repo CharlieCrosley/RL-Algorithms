@@ -1,16 +1,8 @@
+from contextlib import nullcontext
 import math
 import torch
 
-def kl_divergence_discrete(p, q):
-    p = p.detach()
-    return (p * (p.log() - q.log())).sum(-1)
-
-def kl_divergence_continuous(mu_old, std_old, mu_new, std_new):
-    kl = (std_new.log() - std_old.log()) + (std_old.pow(2) + (mu_old - mu_new).pow(2)) / (2.0 * std_new.pow(2)) - 0.5
-    return kl.sum(1, keepdim=True)
-
-def surrogate_loss(new_probabilities, old_probabilities, advantages):
-    return (torch.exp(new_probabilities - old_probabilities) * advantages).mean()
+from models.shared.core import DeterministicPolicy
 
 def normal_log_density(x, mean, log_std, std):
     var = std.pow(2)
@@ -56,3 +48,49 @@ def conjugate_gradient(hessian_vector_product, b, max_iterations=10, residual_er
                 # This means the estimate x is very close to the optimal x
                 break
         return x
+
+def estimate_advantage_with_value_fn(states, rewards, terminal, value_fn, discount=0.99):
+    values = value_fn(states)
+    advantages = torch.Tensor(rewards.size(0),1)#.to(self.device)
+
+    last_value = 0
+    discounted_reward = torch.Tensor(rewards.size(0),1)#.to(self.device)
+    for i in reversed(range(rewards.shape[0])):
+        discounted_reward[i] = rewards[i] + discount * terminal[i] * last_value
+        last_value = discounted_reward[i, 0]
+
+    returns = discounted_reward.clone()
+    advantages = discounted_reward - values
+    return advantages, returns
+
+def kl_divergence_discrete(p, q):
+    p = p.detach()
+    return (p * (p.log() - q.log())).sum(-1)
+
+def kl_divergence_continuous(mu_old, std_old, mu_new, std_new):
+    kl = (std_new.log() - std_old.log()) + (std_old.pow(2) + (mu_old - mu_new).pow(2)) / (2.0 * std_new.pow(2)) - 0.5
+    return kl.sum(1, keepdim=True)
+
+def surrogate_loss(new_probabilities, old_probabilities, advantages):
+    return (torch.exp(new_probabilities - old_probabilities) * advantages).mean()
+
+def compute_surrogate_loss_and_kl(policy, states, actions, advantages, old_log_probs=None, eval=False, ctx=nullcontext()):
+        # calculate log probabilities of actions and calculate kl divergence (combining both saves computation)
+        if isinstance(policy, DeterministicPolicy): 
+            with ctx:
+                dist = policy(states)
+            # DKL(P∥Q) is not defined if there is some i such that Q(i)=0 but P(i)≠0
+            # because of this we need to clip the probabilities by nudging them away from 0 and 1 by the smallest possible value for the dtype
+            dist = torch.distributions.utils.clamp_probs(dist) 
+            probs = torch.gather(dist, 1, actions.long().unsqueeze(1))
+            kl = None if eval else kl_divergence_discrete(dist.detach(), dist).mean()
+            log_probs = probs.log()
+        else:
+            with ctx:
+                mu_new, log_std_new = policy(states)
+            std_new = torch.exp(log_std_new)
+            kl = None if eval else kl_divergence_continuous(mu_new.detach(), std_new.detach(), mu_new, std_new).mean()
+            log_probs = normal_log_density(actions, mu_new, log_std_new, std_new) if old_log_probs is None else old_log_probs
+        
+        old_log_probs = log_probs.detach() if old_log_probs is None else old_log_probs
+        return surrogate_loss(log_probs, old_log_probs, advantages), log_probs, kl

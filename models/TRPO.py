@@ -13,14 +13,13 @@ import os
 import time
 import torch
 import torch.optim as optim
-from torch.distributions import Categorical
 from torch.functional import F
 import wandb
 from models.shared.base_model import BaseModel
 from models.shared.utils import apply_parameter_update, apply_parameter_update, get_flat_params_from
 from models.shared.data import Transition
 from models.shared.core import Value, DeterministicPolicy, StochasticPolicy, flat_grad
-from models.shared.math import conjugate_gradient, kl_divergence_discrete, kl_divergence_continuous, surrogate_loss, normal_log_density
+from models.shared.math import conjugate_gradient, compute_surrogate_loss_and_kl, estimate_advantage_with_value_fn
 
 
 class TRPO(BaseModel):
@@ -57,41 +56,6 @@ class TRPO(BaseModel):
         # Updates the scale for next iteration.
         self.scaler.update()
         return loss.item()
-    
-    def compute_surrogate_loss_and_kl(self, states, actions, advantages, old_log_probs=None, eval=False):
-        # calculate log probabilities of actions and calculate kl divergence
-        if isinstance(self.policy, DeterministicPolicy): 
-            with self.ctx:
-                dist = self.policy(states)
-            # DKL(P∥Q) is not defined if there is some i such that Q(i)=0 but P(i)≠0
-            # because of this we need to clip the probabilities by nudging them away from 0 and 1 by the smallest possible value for the dtype
-            dist = torch.distributions.utils.clamp_probs(dist) 
-            probs = torch.gather(dist, 1, actions.long().unsqueeze(1))
-            kl = None if eval else kl_divergence_discrete(dist.detach(), dist).mean()
-            log_probs = probs.log()
-        else:
-            with self.ctx:
-                mu_new, log_std_new = self.policy(states)
-            std_new = torch.exp(log_std_new)
-            kl = None if eval else kl_divergence_continuous(mu_new.detach(), std_new.detach(), mu_new, std_new).mean()
-            log_probs = normal_log_density(actions, mu_new, log_std_new, std_new) if old_log_probs is None else old_log_probs
-        
-        old_log_probs = log_probs.detach() if old_log_probs is None else old_log_probs
-        return surrogate_loss(log_probs, old_log_probs, advantages), log_probs, kl
-
-    def estimate_advantages(self, states, rewards, terminal):
-        values = self.value_fn(states)
-        advantages = torch.Tensor(rewards.size(0),1).to(self.device)
-  
-        last_value = 0
-        discounted_reward = torch.Tensor(rewards.size(0),1).to(self.device)
-        for i in reversed(range(rewards.shape[0])):
-            discounted_reward[i] = rewards[i] + self.config.gamma * terminal[i] * last_value
-            last_value = discounted_reward[i, 0]
-
-        returns = discounted_reward.clone()
-        advantages = discounted_reward - values
-        return advantages, returns
             
     def train_model(self):
         step_num = 0
@@ -106,13 +70,14 @@ class TRPO(BaseModel):
             rewards = torch.tensor(batch.reward).to(self.device, torch.float32)
             terminal = torch.tensor(batch.terminal).to(self.device)
 
-            advantages, returns = self.estimate_advantages(states, rewards, terminal)
+            advantages, returns = estimate_advantage_with_value_fn(states, rewards, terminal, self.value_fn, discount=self.config.gamma)
+
             # Normalize advantages to help stabilize learning (can improve convergence but may not matter much)
             advantages = (advantages - advantages.mean()) / advantages.std()
 
             value_fn_loss = self.update_value_fn(states, returns)
             
-            policy_loss, fixed_log_probs, kl = self.compute_surrogate_loss_and_kl(states, actions, advantages)
+            policy_loss, fixed_log_probs, kl = compute_surrogate_loss_and_kl(self.policy, states, actions, advantages, ctx=self.ctx)
 
             g = flat_grad(policy_loss, self.policy.parameters(), retain_graph=True).data # We will use the graph several times
             d_kl = flat_grad(kl, self.policy.parameters(), create_graph=True)  # Create graph, because we will call backward() on it (for HVP)
@@ -136,7 +101,7 @@ class TRPO(BaseModel):
                     param_new = prev_params + step
                     apply_parameter_update(self.policy.parameters(), param_new)
 
-                    new_loss, _, kl_new = self.compute_surrogate_loss_and_kl(states, actions, advantages, old_log_probs=fixed_log_probs)
+                    new_loss, _, kl_new = compute_surrogate_loss_and_kl(self.policy, states, actions, advantages, old_log_probs=fixed_log_probs, ctx=self.ctx)
                     loss_improvement = new_loss - old_loss
                     if loss_improvement > 0 and kl_new <= self.config.delta:
                         return True
@@ -189,13 +154,13 @@ class TRPO(BaseModel):
             rewards = torch.tensor(batch.reward).to(self.device, torch.float32)
             terminal = torch.tensor(batch.terminal).to(self.device)
 
-            advantages, returns = self.estimate_advantages(states, rewards, terminal)
+            advantages, returns = estimate_advantage_with_value_fn(states, rewards, terminal, self.value_fn, discount=self.config.gamma)
             # Normalize advantages so that gradients arent too large (can improve convergence but may not matter much)
             advantages = (advantages - advantages.mean()) / advantages.std()
 
             value_fn_loss = self.compute_value_loss(states, returns)
 
-            policy_loss, _, _ = self.compute_surrogate_loss_and_kl(states, actions, advantages, eval=True)
+            policy_loss, _, _ = compute_surrogate_loss_and_kl(self.policy, states, actions, advantages, ctx=self.ctx)
         
             # timing and logging
             t1 = time.time()
