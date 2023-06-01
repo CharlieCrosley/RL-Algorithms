@@ -4,24 +4,20 @@ Vanilla Policy Gradient (VPG)
 
 """
 
-import os
 import time
-import numpy as np
 import torch
-import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
-from torch.distributions import Categorical
 from models.shared.base_model import BaseModel
-from models.shared.utils import init_weights
+from models.shared.data import Transition
 from models.shared.core import StochasticPolicy, DeterministicPolicy, Value
+from models.shared.math import estimate_advantage_with_value_fn, get_action_log_prob
 
 
 class VPG(BaseModel):
 
     def __init__(self, config, env):
         super().__init__(config, env)
-
-        self.n_epochs = config.n_epochs
 
         if self.discrete_action_space:
             self.policy = DeterministicPolicy(self.n_observations, self.n_actions, hidden_layers=config.policy_hidden_n_layers, 
@@ -35,136 +31,125 @@ class VPG(BaseModel):
 
         self.value_fn = Value(self.n_observations, hidden_layers=config.value_hidden_n_layers, hidden_sizes=self.config.value_hidden_sizes, hidden_activation='tanh')
         
+        self.policy_optimizer = optim.Adam(self.policy.parameters(), lr=config.policy_lr) 
         self.value_optimizer = optim.Adam(self.value_fn.parameters(), lr=config.value_lr) 
+        
+        self.best_value_loss = -float('inf')
     
 
-    """ def sample_policy(self, state):
-        logits = self.policy(state)
-        return Categorical(logits=logits)
+    def compute_policy_loss(self, states, actions, advantages):
+        log_probs = get_action_log_prob(self.policy, states, actions, self.ctx)
+        return -(log_probs * advantages).mean() # negative to perform gradient ascent
     
-    def get_action(self, state):
-        state = torch.tensor(state, dtype=torch.float32, device=self.device)
-        return self.sample_policy(state).sample().item() """
-
-    def compute_loss(self, state, action, rewards_to_go):
-        log_prob = self.sample_policy(state).log_prob(action)
-        return -(log_prob * rewards_to_go).mean() # negative to perform gradient ascent
-
-    def reward_to_go(self, rews):
-        """ Calculate the reward-to-go which only includes present and future rewards. """
-        n = len(rews)
-        rtgs = torch.zeros_like(torch.tensor(rews), device=self.device, dtype=torch.float32)
-        for i in reversed(range(n)):
-            rtgs[i] = rews[i] + (rtgs[i+1] if i+1 < n else 0)
-        return rtgs
+    def compute_value_loss(self, states, targets):
+        values = self.value_fn(states)
+        return F.mse_loss(values, targets)
     
-    def sample_batch_from_env(self):
-        """ Sample a batch of trajectories from the environment. """
-
-        batch_states, batch_actions, batch_rewards_to_go, batch_returns, batch_lengths = [], [], [], [], []
-        ep_rews = []
-        state, _ = self.env.reset()
-        while True:
-            action = self.get_action(state)
-            next_state, reward, terminated, _, _ = self.env.step(action) 
-            done = terminated
-
-            batch_states.append(state)
-            batch_actions.append(action)
-            ep_rews.append(reward)
-
-            # Move to the next state
-            state = next_state
-            
-            if done:
-                # Episode is over, record info about episode
-                ep_ret, ep_len = sum(ep_rews), len(ep_rews)
-                batch_returns.append(ep_ret)
-                batch_lengths.append(ep_len)
-
-                batch_rewards_to_go += self.reward_to_go(ep_rews).tolist()
-
-                state, _ = self.env.reset()
-                ep_rews = []
-
-                # end experience loop if we have enough of it
-                if len(batch_states) > self.batch_size:
-                    break
-        return np.array(batch_states), np.array(batch_actions), np.array(batch_rewards_to_go), batch_returns, batch_lengths
-            
+    def update_value_fn(self, states, targets):
+        loss = self.compute_value_loss(states, targets)
+        self.value_optimizer.zero_grad()
+        self.scaler.scale(loss).backward()
+        self.scaler.step(self.value_optimizer)
+        # Updates the scale for next iteration.
+        self.scaler.update()
+        return loss.item()       
             
     def train_model(self):
-        print(self.training)
         step_num = 0
-        for epoch in range(self.num_epochs):
+        for epoch in range(self.epoch, self.n_epochs):
             t0 = time.time()
 
-            batch_states, batch_actions, batch_rewards_to_go, batch_returns, batch_lengths = self.sample_batch_from_env()
+            transitions = self.sample_batch_from_env()
+            batch = Transition(*zip(*transitions))
+            
+            states = torch.stack(batch.state).to(self.device, torch.float32)
+            actions = torch.stack(batch.action).to(self.device, torch.float32)
+            rewards = torch.tensor(batch.reward).to(self.device, torch.float32)
+            terminal = torch.tensor(batch.terminal).to(self.device)
 
-            loss = self.compute_loss(torch.as_tensor(batch_states, device=self.device), 
-                                     torch.as_tensor(batch_actions, device=self.device), 
-                                     torch.as_tensor(batch_rewards_to_go, device=self.device)
-            )
+            advantages, returns = estimate_advantage_with_value_fn(states, rewards, terminal, self.value_fn, self.config.gamma)
+            # Normalize advantages so that gradients arent too large (can improve convergence but may not matter much)
+            advantages = (advantages - advantages.mean()) / advantages.std()
 
-            self.optimizer.zero_grad()
-            loss.backward()
-            self.optimizer.step()
+            policy_loss = self.compute_policy_loss(states, actions, advantages)
+            self.policy_optimizer.zero_grad()
+            policy_loss.backward()
+            self.policy_optimizer.step()
+            
+            value_loss = self.update_value_fn(states, returns)
             
             # timing and logging
             t1 = time.time()
             dt = t1 - t0
             t0 = t1
 
-            step_num += sum(batch_lengths)
-            mean_reward = np.mean(batch_returns)
-            print(f"""epoch {epoch} / step {step_num}: policy loss {loss:.4f} - mean reward {mean_reward:.4f} - time {dt*1000:.2f}ms""")
+            step_num += len(actions)
+            num_episodes = max(terminal.shape[0] - torch.count_nonzero(terminal), 1)
+            mean_reward = sum(rewards) / num_episodes
+            print(f"""epoch {epoch} / step {step_num}: policy loss {policy_loss:.8f} - value loss {value_loss:.4f} - mean reward {mean_reward:.4f} - time {dt*1000:.2f}ms""")
 
-            if epoch % self.eval_interval == 0:
-                self.eval_model()
+            if epoch > 0 and epoch % self.eval_interval == 0:
+                self.eval()
+                self.eval_model(epoch, step_num)
+                self.train()
+            
 
     @torch.no_grad()
-    def eval_model(self, save=True):
+    def eval_model(self, train_epoch=0, train_step_num=0, save=True):
         print("="*100)
         print("Testing model...".center(100))
         print("="*100)
         step_num = 0
-        for epoch in range(self.eval_episodes):
+        for epoch in range(self.n_eval_epochs):
             t0 = time.time()
 
-            batch_states, batch_actions, batch_rewards_to_go, batch_returns, batch_lengths = self.sample_batch_from_env()
+            transitions = self.sample_batch_from_env()
+            batch = Transition(*zip(*transitions))
             
-            loss = self.compute_loss(torch.tensor(batch_states, device=self.device), 
-                                     torch.tensor(batch_actions, device=self.device), 
-                                     torch.tensor(batch_rewards_to_go, device=self.device)
-            )
+            states = torch.stack(batch.state).to(self.device, torch.float32)
+            actions = torch.stack(batch.action).to(self.device, torch.float32)
+            rewards = torch.tensor(batch.reward).to(self.device, torch.float32)
+            terminal = torch.tensor(batch.terminal).to(self.device)
+
+            advantages, returns = estimate_advantage_with_value_fn(states, rewards, terminal, self.value_fn, self.config.gamma)
+            # Normalize advantages so that gradients arent too large (can improve convergence but may not matter much)
+            advantages = (advantages - advantages.mean()) / advantages.std()
+
+            policy_loss = self.compute_policy_loss(states, actions, advantages)
+           
+            value_loss = self.compute_value_loss(states, returns)
         
             # timing and logging
             t1 = time.time()
             dt = t1 - t0
             t0 = t1
 
-            step_num += sum(batch_lengths)
-            mean_reward = np.mean(batch_returns)
-            print(f"""epoch {epoch} / step {step_num}: policy loss {loss:.4f} - mean reward {mean_reward:.4f} - time {dt*1000:.2f}ms""")
+            step_num += len(actions)
+            num_episodes = max(terminal.shape[0] - torch.count_nonzero(terminal), 1)
+            mean_reward = sum(rewards) / num_episodes
+            print(f"""eval epoch {epoch} / step {step_num}: policy loss {policy_loss:.8f} - value loss {value_loss:.4f} - mean reward {mean_reward:.4f} - time {dt*1000:.2f}ms""")
 
-            if save and mean_reward > self.best_reward:
+            if save and mean_reward >= self.best_mean_reward and value_loss > self.best_value_loss:
                 print("Saving model...")
-                self.best_reward = mean_reward
-                self.save()
+                self.best_mean_reward = mean_reward
+                self.best_policy_loss = policy_loss
+                self.best_value_loss = value_loss
+                self.save(train_epoch+1, train_step_num+1)
         print("="*100)
         print("Finished Testing!".center(100))
         print("="*100)
 
 
-    def save(self):
-        path = os.path.join(self.config.out_dir, 'model.pt')
-        torch.save({'model_state_dict': self.state_dict(),
-                    'optimizer_state_dict': self.optimizer.state_dict(),
+    def save(self, epoch=None, step_num=None):
+        super().save({'model_state_dict': self.state_dict(),
+                    'optimizers': {
+                        'policy_optimizer': self.policy_optimizer.state_dict(),
+                        'value_optimizer': self.value_optimizer.state_dict()
+                    },
                     'config': self.config,
-                    'best_reward': self.best_reward}, path)
-
-    def load(self, checkpoint):
-        self.load_state_dict(checkpoint['model_state_dict'])
-        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        self.config = checkpoint['config']
-        self.best_reward = checkpoint['best_reward']
+                    'best_mean_reward': self.best_mean_reward,
+                    'best_policy_loss': self.best_policy_loss,
+                    'best_value_loss': self.best_value_loss,
+                    'epoch': epoch,
+                    'step_num': step_num,})
+        

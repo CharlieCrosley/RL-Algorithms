@@ -51,10 +51,8 @@ def conjugate_gradient(hessian_vector_product, b, max_iterations=10, residual_er
 
 def estimate_advantage_with_value_fn(states, rewards, terminal, value_fn, discount=0.99):
     values = value_fn(states)
-    advantages = torch.Tensor(rewards.size(0),1)#.to(self.device)
-
     last_value = 0
-    discounted_reward = torch.Tensor(rewards.size(0),1)#.to(self.device)
+    discounted_reward = torch.empty((rewards.size(0),1), device=states.device)
     for i in reversed(range(rewards.shape[0])):
         discounted_reward[i] = rewards[i] + discount * terminal[i] * last_value
         last_value = discounted_reward[i, 0]
@@ -94,3 +92,15 @@ def compute_surrogate_loss_and_kl(policy, states, actions, advantages, old_log_p
         
         old_log_probs = log_probs.detach() if old_log_probs is None else old_log_probs
         return surrogate_loss(log_probs, old_log_probs, advantages), log_probs, kl
+
+def get_action_log_prob(policy, states, actions, ctx=nullcontext()):
+    if isinstance(policy, DeterministicPolicy): 
+        with ctx:
+            dist = policy(states)
+        probs = torch.gather(dist, 1, actions.long().unsqueeze(1))
+        return probs.log()
+    else:
+        with ctx:
+            mu_new, log_std_new = policy(states)
+        return normal_log_density(actions, mu_new, log_std_new, torch.exp(log_std_new))
+      

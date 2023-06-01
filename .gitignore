@@ -164,3 +164,4 @@ dev.ipynb
 model.pt
 output/
 wandb/
+*.tar

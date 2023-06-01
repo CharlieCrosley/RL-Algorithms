@@ -27,8 +27,6 @@ class TRPO(BaseModel):
     def __init__(self, config, env):
         super().__init__(config, env)
 
-        self.n_epochs = config.n_epochs
-
         if self.discrete_action_space:
             self.policy = DeterministicPolicy(self.n_observations, self.n_actions, hidden_layers=config.policy_hidden_n_layers, 
                                               hidden_sizes=self.config.policy_hidden_sizes, hidden_activation='relu', 
@@ -40,8 +38,9 @@ class TRPO(BaseModel):
                                            log_sig_max=self.config.log_sig_max, epsilon=self.config.epsilon)
 
         self.value_fn = Value(self.n_observations, hidden_layers=config.value_hidden_n_layers, hidden_sizes=self.config.value_hidden_sizes, hidden_activation='tanh')
-        
         self.value_optimizer = optim.Adam(self.value_fn.parameters(), lr=config.value_lr) 
+
+        self.best_value_loss = -float('inf')
 
     def compute_value_loss(self, states, targets):
         values = self.value_fn(states)
@@ -61,9 +60,9 @@ class TRPO(BaseModel):
         step_num = 0
         for epoch in range(self.epoch, self.n_epochs):
             t0 = time.time()
-            trajectories = self.sample_batch_from_env()
+            transitions = self.sample_batch_from_env()
             
-            batch = Transition(*zip(*trajectories))
+            batch = Transition(*zip(*transitions))
             
             states = torch.stack(batch.state).to(self.device, torch.float32)
             actions = torch.stack(batch.action).to(self.device, torch.float32)
@@ -115,8 +114,7 @@ class TRPO(BaseModel):
 
             step_num += len(actions)
             # terminal values of zero indicate end of episode
-            num_episodes = terminal.shape[0] - torch.count_nonzero(terminal)
-            num_episodes = num_episodes if num_episodes > 0 else 1
+            num_episodes = max(terminal.shape[0] - torch.count_nonzero(terminal), 1)
             mean_reward = sum(rewards) / num_episodes
             print(f"""epoch {epoch+1} / step {step_num}: policy loss {policy_loss} - value loss {value_fn_loss:.4f} - mean reward {mean_reward:.4f} - time {dt*1000:.2f}ms""")
 
@@ -186,7 +184,7 @@ class TRPO(BaseModel):
 
 
     def save(self, epoch=None, step_num=None):
-        path = os.path.join(self.config.out_dir, 'model.pt')
+        path = os.path.join(self.config.out_dir, 'model.tar')
         torch.save({'model_state_dict': self.state_dict(),
                     'value_optimizer_state_dict': self.value_optimizer.state_dict(),
                     'config': self.config,

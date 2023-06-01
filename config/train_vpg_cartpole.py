@@ -9,8 +9,10 @@ config = VPGConfig(
     wandb_run_name = "run_" + str(datetime.datetime.now()),
     out_dir = join("outputs", "out_vpg_cartpole"),
     env_name = "CartPole-v1",
-    batch_size=256,
-    policy_lr=3e-3,
+    batch_size=4000,
+    policy_lr=1e-2,
+    value_lr=1e-2,
     compile=False,
-    num_epochs=7
+    n_epochs=100,
+    device='cpu'
 )

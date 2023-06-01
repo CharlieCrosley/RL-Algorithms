@@ -6,6 +6,7 @@ class BaseConfig:
     algorithm: str = "vpg"
     env_name: str = "CartPole-v1"
     policy_lr: float = 1e-3
+    value_lr: float = 1e-3
     policy_hidden_n_layers: int = 1
     policy_hidden_sizes: tuple[int, ...] | list[int] = (64, 32)
     value_hidden_n_layers: int = 1
@@ -31,7 +32,8 @@ class BaseConfig:
 @dataclass
 class VPGConfig(BaseConfig):
     algorithm: str = "vpg"
-    num_epochs: int = 100
+    n_epochs: int = 100
+    gamma: float = 0.99
 
 @dataclass
 class TRPOConfig(BaseConfig):

@@ -1,4 +1,5 @@
 from contextlib import nullcontext
+import os
 from torch.distributions import Categorical
 import torch
 from torch.cuda.amp import GradScaler
@@ -6,6 +7,7 @@ from abc import ABC, abstractmethod
 
 from models.shared.core import DeterministicPolicy
 from models.shared.data import Transition
+from operator import attrgetter
 
 ptdtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}
 
@@ -24,6 +26,8 @@ class BaseModel(torch.nn.Module, ABC):
         self.n_eval_epochs = config.n_eval_epochs
         self.eval_interval = config.eval_interval
         self.epoch = 0
+        self.n_epochs = config.n_epochs
+
         self.best_mean_reward = -float('inf')
         
         self.n_observations = env.observation_space.shape[0]
@@ -96,12 +100,37 @@ class BaseModel(torch.nn.Module, ABC):
         """Evaluate the model."""
         pass
     
-    @abstractmethod
-    def save(self):
+    def save(self, save_dict):
         """ Save model parameters """
-        pass
 
-    @abstractmethod
+        for wrapper in self.env.spec.additional_wrappers: # NormalizeObservation wrapper keeps running mean and variance, so we need to save them
+            if wrapper.name == 'NormalizeObservation':
+                save_dict['env_args'] = {'NormalizeObservation': {}}
+                save_dict['env_args']['NormalizeObservation']['env.obs_rms.mean'] = self.env.obs_rms.mean
+                save_dict['env_args']['NormalizeObservation']['env.obs_rms.var'] = self.env.obs_rms.var
+                save_dict['env_args']['NormalizeObservation']['env.obs_rms.count'] = self.env.obs_rms.count
+                save_dict['env_args']['NormalizeObservation']['env.epsilon'] = self.env.epsilon
+                break
+
+        path = os.path.join(self.config.out_dir, 'model.tar')
+        torch.save(save_dict, path)
+
     def load(self, checkpoint):
         """ Load model parameters """
-        pass
+
+        for key, value in checkpoint.items():
+            if key == 'optimizers':
+                for optim, state_dict in checkpoint['optimizers'].items():
+                    self.__dict__[optim].load_state_dict(state_dict)
+            elif key == 'model_state_dict':
+                self.load_state_dict(value)
+            elif key == 'env_args':
+                for wrapper, params in checkpoint['env_args'].items(): # kinda gross but it works as long as the dict keys have correct names
+                    for param, value in params.items():
+                        obj = self
+                        var_path = param.split('.')
+                        for var in var_path[:-1]:
+                            obj = obj.__dict__[var]
+                        obj.__dict__[var_path[-1]] = value
+            else:
+                self.__dict__[key] = value

@@ -10,7 +10,7 @@ config = get_config()
 
 env = gym.make(config.env_name) #, render_mode="human"
 env = NormalizeObservation(env) # very important!
-#env = FrameStack(env, num_stack=n_frame_stack)
+#env = FrameStack(env, num_stack=1)
 
 seed = 0
 os.makedirs(config.out_dir, exist_ok=True)
@@ -31,7 +31,7 @@ if config.init_from == 'scratch':
 elif config.init_from == 'resume':
     print(f"Resuming training from {config.out_dir}")
     # resume training from a checkpoint.
-    path = os.path.join(config.out_dir, 'model.pt')
+    path = os.path.join(config.out_dir, 'model.tar')
     checkpoint = torch.load(path, map_location=config.device)
     model.load(checkpoint)
     checkpoint = None # free up memory
