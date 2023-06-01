@@ -1,7 +1,11 @@
 from contextlib import nullcontext
+from torch.distributions import Categorical
 import torch
 from torch.cuda.amp import GradScaler
 from abc import ABC, abstractmethod
+
+from models.shared.core import DeterministicPolicy
+from models.shared.data import Transition
 
 ptdtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}
 
@@ -43,15 +47,44 @@ class BaseModel(torch.nn.Module, ABC):
             import wandb
             wandb.init(project=config.wandb_project, name=config.wandb_run_name, config=config)
 
-    @abstractmethod
+    @torch.no_grad()
     def get_action(self, state):
         """Get action from the model."""
-        pass
+        
+        state = torch.from_numpy(state).to(device=self.device, dtype=self.dtype)
+        if isinstance(self.policy, DeterministicPolicy):
+            if self.training:
+                dist = Categorical(self.policy(state))  # Create a distribution from logits for actions
+                return dist.sample().item()
+            else:
+                return self.policy(state).argmax().item()
+        else:
+            action, _, _, _, _ = self.policy.sample(state)
+            return action.cpu().numpy()
 
-    @abstractmethod
-    def sample_batch_from_env(self):
-        """Sample a batch of transitions from the environment."""
-        pass
+
+    def sample_batch_from_env(self, enable_truncation=False):
+        """ Sample a batch of transitions from the environment. """
+
+        transitions = []
+        state, _ = self.env.reset()
+        # sample a batch of trajectories
+        for t in range(self.config.batch_size):
+            # Runs the forward pass with autocasting.
+            with self.ctx:
+                action = self.get_action(state)
+            next_state, reward, terminated, truncated, _ = self.env.step(action) 
+            done = terminated or (enable_truncation and truncated)
+
+            transitions.append(Transition(torch.from_numpy(state), 
+                                       torch.tensor(action),
+                                       torch.from_numpy(next_state),
+                                       reward, 
+                                       float(not(done))))
+            if done: 
+                state, _ = self.env.reset()
+            state = next_state # Move to the next state
+        return transitions
 
     @abstractmethod
     def train_model(self):

@@ -13,7 +13,7 @@ import torch.optim as optim
 from torch.distributions import Categorical
 from models.shared.base_model import BaseModel
 from models.shared.utils import init_weights
-from models.shared.core import StochasticPolicy
+from models.shared.core import StochasticPolicy, DeterministicPolicy, Value
 
 
 class VPG(BaseModel):
@@ -21,22 +21,30 @@ class VPG(BaseModel):
     def __init__(self, config, env):
         super().__init__(config, env)
 
-        self.num_epochs = config.num_epochs
+        self.n_epochs = config.n_epochs
 
-        self.policy = StochasticPolicy(config, self.n_observations, self.n_actions, config.hidden)
+        if self.discrete_action_space:
+            self.policy = DeterministicPolicy(self.n_observations, self.n_actions, hidden_layers=config.policy_hidden_n_layers, 
+                                              hidden_sizes=self.config.policy_hidden_sizes, hidden_activation='relu', 
+                                              final_activation='softmax', frame_stack=self.config.frame_stack, bias=self.config.bias)
+        else:
+            self.policy = StochasticPolicy(self.n_observations, self.n_actions, hidden_layers=config.policy_hidden_n_layers, 
+                                           hidden_sizes=self.config.policy_hidden_sizes, hidden_activation='tanh', action_space=env.action_space, 
+                                           frame_stack=self.config.frame_stack, bias=self.config.bias, log_sig_min=self.config.log_sig_min, 
+                                           log_sig_max=self.config.log_sig_max, epsilon=self.config.epsilon)
 
-        self.policy.apply(init_weights)
-
-        self.optimizer = optim.Adam(self.policy.parameters(), lr=config.policy_lr)
+        self.value_fn = Value(self.n_observations, hidden_layers=config.value_hidden_n_layers, hidden_sizes=self.config.value_hidden_sizes, hidden_activation='tanh')
+        
+        self.value_optimizer = optim.Adam(self.value_fn.parameters(), lr=config.value_lr) 
     
 
-    def sample_policy(self, state):
+    """ def sample_policy(self, state):
         logits = self.policy(state)
         return Categorical(logits=logits)
     
     def get_action(self, state):
         state = torch.tensor(state, dtype=torch.float32, device=self.device)
-        return self.sample_policy(state).sample().item()
+        return self.sample_policy(state).sample().item() """
 
     def compute_loss(self, state, action, rewards_to_go):
         log_prob = self.sample_policy(state).log_prob(action)

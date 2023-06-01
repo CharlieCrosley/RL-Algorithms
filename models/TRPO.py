@@ -57,19 +57,6 @@ class TRPO(BaseModel):
         # Updates the scale for next iteration.
         self.scaler.update()
         return loss.item()
-
-    @torch.no_grad()
-    def get_action(self, state):
-        state = torch.from_numpy(state).to(device=self.device, dtype=self.dtype)
-        if isinstance(self.policy, DeterministicPolicy):
-            if self.training:
-                dist = Categorical(self.policy(state))  # Create a distribution from logits for actions
-                return dist.sample().item()
-            else:
-                return self.policy(state).argmax().item()
-        else:
-            action, _, _, _, _ = self.policy.sample(state)
-            return action.cpu().numpy()
     
     def compute_surrogate_loss_and_kl(self, states, actions, advantages, old_log_probs=None, eval=False):
         # calculate log probabilities of actions and calculate kl divergence
@@ -105,30 +92,6 @@ class TRPO(BaseModel):
         returns = discounted_reward.clone()
         advantages = discounted_reward - values
         return advantages, returns
-
-   
-    def sample_batch_from_env(self):
-        """ Sample a batch of trajectories from the environment. """
-
-        transitions = []
-        state, _ = self.env.reset()
-        # sample a batch of trajectories
-        for t in range(self.config.batch_size):
-            # Runs the forward pass with autocasting.
-            with self.ctx:
-                action = self.get_action(state)
-            next_state, reward, terminated, truncated, _ = self.env.step(action) 
-            done = terminated
-
-            transitions.append(Transition(torch.from_numpy(state), 
-                                       torch.tensor(action),
-                                       torch.from_numpy(next_state),
-                                       reward, 
-                                       float(not(done))))
-            if done: 
-                state, _ = self.env.reset()
-            state = next_state # Move to the next state
-        return transitions
             
     def train_model(self):
         step_num = 0
