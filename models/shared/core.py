@@ -7,17 +7,18 @@ from models.shared.utils import create_layers
 
 class Value(nn.Module):
     
-    def __init__(self, config, state_dim, hidden_layers=1, hidden_sizes=(64,32), hidden_activation='relu', final_activation=None):
+    def __init__(self, state_dim, hidden_layers=1, hidden_sizes=(64,32), hidden_activation='relu', final_activation=None, frame_stack=1, bias=True):
         super().__init__()
 
-        self.layers = create_layers(
-            config, 
+        self.layers = create_layers( 
             state_dim, 
             1, 
             hidden_layers=hidden_layers,
             hidden_sizes=hidden_sizes,
             hidden_activation=hidden_activation, 
-            final_activation=final_activation
+            final_activation=final_activation,
+            frame_stack=frame_stack,
+            bias=bias
         )
     
     def forward(self, state):
@@ -31,18 +32,19 @@ class ActionValue(nn.Module):
         super().__init__()
 
 class DeterministicPolicy(nn.Module):
-    def __init__(self, config, n_observations, n_actions, hidden_layers=1, hidden_sizes=(64,32), hidden_activation='relu', final_activation=None):
+    def __init__(self, n_observations, n_actions, hidden_layers=1, hidden_sizes=(64,32), hidden_activation='relu', final_activation=None, frame_stack=1, bias=True):
         super().__init__()
         assert final_activation in ['tanh', 'relu', 'sigmoid', 'softmax', None]
         assert hidden_activation in ['tanh', 'relu', 'sigmoid', 'softmax', None]
         self.layers = create_layers(
-            config, 
             n_observations, 
             n_actions, 
             hidden_layers=hidden_layers,
             hidden_sizes=hidden_sizes,
             hidden_activation=hidden_activation, 
-            final_activation=final_activation
+            final_activation=final_activation,
+            frame_stack=frame_stack,
+            bias=bias
         )
 
     def forward(self, state):
@@ -52,21 +54,25 @@ class DeterministicPolicy(nn.Module):
         return x
     
 class StochasticPolicy(nn.Module):
-    def __init__(self, config, n_observations, n_actions, hidden_layers=1, hidden_sizes=(256,256), hidden_activation='relu', action_space=None):
+    def __init__(self, n_observations, n_actions, hidden_layers=1, hidden_sizes=(256,256), hidden_activation='relu', 
+                 action_space=None, frame_stack=1, bias=True, log_sig_min=-20, log_sig_max=2, epsilon=1e-8):
         super().__init__()
 
-        self.config = config
-
         self.layers = create_layers(
-                    config, 
                     n_observations, 
                     hidden_sizes[-1], 
                     hidden_layers=hidden_layers,
                     hidden_sizes=hidden_sizes,
-                    hidden_activation=hidden_activation
+                    hidden_activation=hidden_activation,
+                    frame_stack=frame_stack,
+                    bias=bias
                 )
         self.mean_linear = nn.Linear(hidden_sizes[-1], n_actions)
         self.log_std_linear = nn.Linear(hidden_sizes[-1], n_actions)
+
+        self.log_sig_min = log_sig_min
+        self.log_sig_max = log_sig_max
+        self.epsilon = epsilon
         
         # action rescaling
         if action_space is None:
@@ -87,7 +93,7 @@ class StochasticPolicy(nn.Module):
         mean = self.mean_linear(x)
 
         log_std = self.log_std_linear(x)
-        log_std = torch.clamp(log_std, min=self.config.log_sig_min, max=self.config.log_sig_max)
+        log_std = torch.clamp(log_std, min=self.log_sig_min, max=self.log_sig_max)
 
         return mean, log_std
     
@@ -102,7 +108,7 @@ class StochasticPolicy(nn.Module):
 
         log_prob = normal.log_prob(x_t)
         # Enforcing Action Bound
-        log_prob -= torch.log(self.action_scale * (1 - y_t.pow(2)) + self.config.epsilon)
+        log_prob -= torch.log(self.action_scale * (1 - y_t.pow(2)) + self.epsilon)
         log_prob = log_prob.sum(-1, keepdim=True)
         mean = torch.tanh(mean) * self.action_scale + self.action_bias
         return action, log_prob, mean, log_std, normal

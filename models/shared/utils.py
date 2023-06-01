@@ -28,7 +28,7 @@ def init_weights2(module):
         if module.bias is not None:
             torch.nn.init.zeros_(module.bias)
 
-def create_layers(config, n_input, n_output, hidden_layers=None, hidden_sizes=None, hidden_activation='relu', final_activation=None):
+def create_layers(n_input, n_output, hidden_layers=None, hidden_sizes=None, hidden_activation='relu', final_activation=None, frame_stack=1, bias=True):
     assert hidden_layers != None and hidden_sizes != None
     if hidden_layers == None:
         hidden_layers = len(hidden_sizes-1)
@@ -36,14 +36,14 @@ def create_layers(config, n_input, n_output, hidden_layers=None, hidden_sizes=No
         hidden_sizes = [64] * (hidden_layers+1)
 
     layers = nn.ModuleList()
-    layers.append(nn.Linear(config.n_frame_stack * n_input, hidden_sizes[0], bias=config.bias))
+    layers.append(nn.Linear(frame_stack * n_input, hidden_sizes[0], bias=bias))
     layers.append(get_ativation_fn(hidden_activation))
 
     for i in range(hidden_layers):
-        layers.append(nn.Linear(hidden_sizes[i], hidden_sizes[i+1], bias=config.bias))
+        layers.append(nn.Linear(hidden_sizes[i], hidden_sizes[i+1], bias=bias))
         layers.append(get_ativation_fn(hidden_activation))
 
-    layers.append(nn.Linear(hidden_sizes[-1], n_output, bias=config.bias))
+    layers.append(nn.Linear(hidden_sizes[-1], n_output, bias=bias))
     if final_activation is not None:
         layers.append(get_ativation_fn(final_activation))
     return layers
@@ -60,14 +60,6 @@ def get_ativation_fn(activation):
             return nn.Softmax(dim=-1)
         case _:
             raise ValueError(f'Unknown activation: {activation}')
-
-""" def apply_parameter_update(parameters, grad_flattened):
-    n = 0
-    for p in parameters:
-        numel = p.numel()
-        g = grad_flattened[n:n + numel].view(p.shape)
-        p.data += g
-        n += numel """
 
 def apply_parameter_update(parameters, new_param_flat):
     offset = 0

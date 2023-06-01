@@ -13,6 +13,7 @@ import torch.optim as optim
 from torch.distributions import Categorical
 from models.shared.base_model import BaseModel
 from models.shared.utils import init_weights
+from models.shared.core import StochasticPolicy
 
 
 class VPG(BaseModel):
@@ -22,13 +23,7 @@ class VPG(BaseModel):
 
         self.num_epochs = config.num_epochs
 
-        self.policy = nn.Sequential(
-            nn.Linear(self.n_observations, config.hidden_size),
-            nn.ReLU(),
-            nn.Linear(config.hidden_size, config.hidden_size),
-            nn.ReLU(),
-            nn.Linear(config.hidden_size, self.n_actions)
-        )
+        self.policy = StochasticPolicy(config, self.n_observations, self.n_actions, config.hidden)
 
         self.policy.apply(init_weights)
 

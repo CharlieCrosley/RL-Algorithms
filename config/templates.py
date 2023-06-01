@@ -11,7 +11,7 @@ class BaseConfig:
     value_hidden_n_layers: int = 1
     value_hidden_sizes: tuple[int, ...] | list[int] = (64, 32)
     batch_size: int = 64 
-    n_frame_stack: int = 1
+    frame_stack: int = 1 # for atari envs to show momentum
     bias: bool = True
     log_interval: int = 1
     n_eval_epochs: int = 4
