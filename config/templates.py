@@ -28,11 +28,11 @@ class BaseConfig:
     wandb_log: bool = False
     wandb_project: str = "project"
     wandb_run_name: str = "run_" + str(time.time())
+    n_epochs: int = 1000
 
 @dataclass
 class VPGConfig(BaseConfig):
     algorithm: str = "vpg"
-    n_epochs: int = 100
     gamma: float = 0.99
 
 @dataclass
@@ -45,7 +45,12 @@ class TRPOConfig(BaseConfig):
     cg_iters: int = 10
     max_kl_divergence: float = 0.01
     damping_coeff: float = 0.1
-    value_lr: float = 0.001
-    n_epochs: int = 1000
-    batch_size: int = 4000
     
+@dataclass
+class PPOConfig(BaseConfig):
+    algorithm: str = "ppo"
+    gamma: float = 0.99
+    clip_ratio: float = 0.2
+    max_kl_divergence: float = 0.01
+    lambda_entropy: float = 0.97
+    update_steps: int = 80
