@@ -29,6 +29,7 @@ class BaseConfig:
     wandb_project: str = "project"
     wandb_run_name: str = "run_" + str(time.time())
     n_epochs: int = 1000
+    update_steps: int = 80
 
 @dataclass
 class VPGConfig(BaseConfig):
@@ -38,7 +39,6 @@ class VPGConfig(BaseConfig):
 @dataclass
 class TRPOConfig(BaseConfig):
     algorithm: str = "trpo"
-    delta: float = 0.01
     gamma: float = 0.995
     backtrack_coeff: float = 0.8
     backtrack_iters: int = 10
@@ -53,4 +53,4 @@ class PPOConfig(BaseConfig):
     clip_ratio: float = 0.2
     max_kl_divergence: float = 0.01
     lambda_entropy: float = 0.97
-    update_steps: int = 80
+    

@@ -66,12 +66,9 @@ class TRPO(BaseModel):
             terminal = torch.tensor(batch.terminal).to(self.device)
 
             advantages, returns = estimate_advantage_with_value_fn(states, rewards, terminal, self.value_fn, discount=self.config.gamma)
-
             # Normalize advantages to help stabilize learning (can improve convergence but may not matter much)
             advantages = (advantages - advantages.mean()) / advantages.std()
 
-            value_fn_loss = self.update_value_fn(states, returns)
-            
             policy_loss, fixed_log_probs, kl = compute_surrogate_loss_and_kl(self.policy, states, actions, advantages, ctx=self.ctx)
 
             g = flat_grad(policy_loss, self.policy.parameters(), retain_graph=True).data # We will use the graph several times
@@ -83,11 +80,11 @@ class TRPO(BaseModel):
             
             step_dir = conjugate_gradient(hessian_vector_product, g, max_iterations=self.config.cg_iters)
             
-            max_length = torch.sqrt(2 * self.config.delta / (step_dir @ hessian_vector_product(step_dir)))
+            max_length = torch.sqrt(2 * self.config.max_kl_divergence / (step_dir @ hessian_vector_product(step_dir)))
             max_step = max_length * step_dir
             
             old_loss = policy_loss
-            
+
             @torch.no_grad()
             def backtracking_line_search():
                 prev_params = get_flat_params_from(self.policy)
@@ -103,6 +100,9 @@ class TRPO(BaseModel):
                 return False
             
             backtracking_line_search()
+
+            for _ in range(self.config.update_steps):
+                value_fn_loss = self.update_value_fn(states, returns)
             
             # timing and logging
             t1 = time.time()
