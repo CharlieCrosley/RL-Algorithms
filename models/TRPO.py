@@ -27,15 +27,11 @@ class TRPO(BaseModel):
     def __init__(self, config, env):
         super().__init__(config, env)
 
-        if self.discrete_action_space:
-            self.policy = DeterministicPolicy(self.n_observations, self.n_actions, hidden_layers=config.policy_hidden_n_layers, 
-                                              hidden_sizes=self.config.policy_hidden_sizes, hidden_activation='relu', 
-                                              final_activation='softmax', frame_stack=self.config.frame_stack, bias=self.config.bias)
-        else:
-            self.policy = StochasticPolicy(self.n_observations, self.n_actions, hidden_layers=config.policy_hidden_n_layers, 
-                                           hidden_sizes=self.config.policy_hidden_sizes, hidden_activation='tanh', action_space=env.action_space, 
-                                           frame_stack=self.config.frame_stack, bias=self.config.bias, log_sig_min=self.config.log_sig_min, 
-                                           log_sig_max=self.config.log_sig_max, epsilon=self.config.epsilon)
+        
+        self.policy = StochasticPolicy(self.n_observations, self.n_actions, hidden_layers=config.policy_hidden_n_layers, 
+                                        hidden_sizes=self.config.policy_hidden_sizes, hidden_activation='tanh', action_space=env.action_space, 
+                                        frame_stack=self.config.frame_stack, bias=self.config.bias, log_sig_min=self.config.log_sig_min, 
+                                        log_sig_max=self.config.log_sig_max, epsilon=self.config.epsilon, discrete=self.discrete_action_space)
 
         self.value_fn = Value(self.n_observations, hidden_layers=config.value_hidden_n_layers, hidden_sizes=self.config.value_hidden_sizes, hidden_activation='tanh')
         self.value_optimizer = optim.Adam(self.value_fn.parameters(), lr=config.value_lr) 
@@ -102,7 +98,7 @@ class TRPO(BaseModel):
 
                     new_loss, _, kl_new = compute_surrogate_loss_and_kl(self.policy, states, actions, advantages, old_log_probs=fixed_log_probs, ctx=self.ctx)
                     loss_improvement = new_loss - old_loss
-                    if loss_improvement > 0 and kl_new <= self.config.delta:
+                    if loss_improvement > 0 and kl_new <= self.config.max_kl_divergence:
                         return True
                 return False
             

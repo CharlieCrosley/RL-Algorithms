@@ -1,5 +1,6 @@
 from contextlib import nullcontext
 import os
+import numpy as np
 from torch.distributions import Categorical
 import torch
 from torch.cuda.amp import GradScaler
@@ -63,7 +64,11 @@ class BaseModel(torch.nn.Module, ABC):
             else:
                 return self.policy(state).argmax().item()
         else:
-            action, _, _, _, _ = self.policy.sample(state)
+            action, _, mean, _ = self.policy.sample(state)
+            if not self.training:
+                action = mean # take the mean action during evaluation
+            
+            #print(action)
             return action.cpu().numpy()
 
 
@@ -77,7 +82,10 @@ class BaseModel(torch.nn.Module, ABC):
             # Runs the forward pass with autocasting.
             with self.ctx:
                 action = self.get_action(state)
-            next_state, reward, terminated, truncated, _ = self.env.step(action) 
+                if self.discrete_action_space:       
+                    next_state, reward, terminated, truncated, _ = self.env.step(np.argmax(action)) 
+                else:
+                    next_state, reward, terminated, truncated, _ = self.env.step(action)
             done = terminated or (enable_truncation and truncated)
 
             transitions.append(Transition(torch.from_numpy(state), 

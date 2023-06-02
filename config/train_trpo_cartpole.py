@@ -18,5 +18,6 @@ config = TRPOConfig(
     compile=False,
     eval_interval=10,
     n_eval_epochs = 3,
-    device='cpu' # cpu faster for small models
+    device='cpu', # cpu faster for small models
+    delta = 1
 )

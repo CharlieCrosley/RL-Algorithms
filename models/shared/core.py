@@ -55,7 +55,7 @@ class DeterministicPolicy(nn.Module):
     
 class StochasticPolicy(nn.Module):
     def __init__(self, n_observations, n_actions, hidden_layers=1, hidden_sizes=(256,256), hidden_activation='relu', 
-                 action_space=None, frame_stack=1, bias=True, log_sig_min=-20, log_sig_max=2, epsilon=1e-8):
+                 action_space=None, frame_stack=1, bias=True, log_sig_min=-20, log_sig_max=2, epsilon=1e-8, discrete=False):
         super().__init__()
 
         self.layers = create_layers(
@@ -75,7 +75,7 @@ class StochasticPolicy(nn.Module):
         self.epsilon = epsilon
         
         # action rescaling
-        if action_space is None:
+        if action_space is None or discrete:
             self.register_buffer('action_scale', torch.tensor(1.))
             self.register_buffer('action_bias', torch.tensor(0.))
         else:
@@ -111,7 +111,7 @@ class StochasticPolicy(nn.Module):
         log_prob -= torch.log(self.action_scale * (1 - y_t.pow(2)) + self.epsilon)
         log_prob = log_prob.sum(-1, keepdim=True)
         mean = torch.tanh(mean) * self.action_scale + self.action_bias
-        return action, log_prob, mean, log_std, normal
+        return action, log_prob, mean, log_std
     
 def flat_grad(x, parameters, retain_graph=False, create_graph=False):
     """ Compute gradient of x w.r.t parameters and flatten it """
