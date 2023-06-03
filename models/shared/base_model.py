@@ -18,7 +18,10 @@ class BaseModel(torch.nn.Module, ABC):
     def __init__(self, config, env):
         super(BaseModel, self).__init__()
         assert config.policy_hidden_n_layers+1 == len(config.policy_hidden_sizes)
-        assert config.value_hidden_n_layers+1 == len(config.value_hidden_sizes)
+        if hasattr(config, 'value_hidden_n_layers'):
+            assert config.value_hidden_n_layers+1 == len(config.value_hidden_sizes)
+        if hasattr(config, 'q_hidden_n_layers'):
+            assert config.q_hidden_n_layers+1 == len(config.q_hidden_sizes)
         
         self.env = env
         self.device = config.device
@@ -78,7 +81,7 @@ class BaseModel(torch.nn.Module, ABC):
         transitions = []
         state, _ = self.env.reset()
         # sample a batch of trajectories
-        for t in range(self.config.batch_size):
+        for t in range(self.config.steps_per_epoch):
             # Runs the forward pass with autocasting.
             with self.ctx:
                 action = self.get_action(state)

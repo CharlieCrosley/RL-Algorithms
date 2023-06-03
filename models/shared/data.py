@@ -5,8 +5,6 @@ from random import sample
 Transition = namedtuple('Transition',
                         ('state', 'action', 'next_state', 'reward', 'terminal'))
 
-Trajectory = namedtuple('Trajectory',
-                        ['states', 'actions', 'rewards', 'next_states', 'terminal'])
 
 class ReplayMemory(object):
 

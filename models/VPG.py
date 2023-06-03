@@ -1,6 +1,6 @@
 """
 
-Vanilla Policy Gradient (VPG)
+Vanilla Policy Gradient (VPG) implementation.
 
 """
 
@@ -10,7 +10,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from models.shared.base_model import BaseModel
 from models.shared.data import Transition
-from models.shared.core import StochasticPolicy, DeterministicPolicy, Value
+from models.shared.core import StochasticPolicy, Value
 from models.shared.math import estimate_advantage_with_value_fn, get_action_log_prob
 
 

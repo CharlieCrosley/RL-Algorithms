@@ -7,11 +7,11 @@ from models.shared.utils import create_layers
 
 class Value(nn.Module):
     
-    def __init__(self, state_dim, hidden_layers=1, hidden_sizes=(64,32), hidden_activation='relu', final_activation=None, frame_stack=1, bias=True):
+    def __init__(self, n_observations, hidden_layers=1, hidden_sizes=(64,32), hidden_activation='relu', final_activation=None, frame_stack=1, bias=True):
         super().__init__()
 
         self.layers = create_layers( 
-            state_dim, 
+            n_observations, 
             1, 
             hidden_layers=hidden_layers,
             hidden_sizes=hidden_sizes,
@@ -28,8 +28,31 @@ class Value(nn.Module):
         return x
 
 class ActionValue(nn.Module):
-    def __init__(self, state_dim, action_dim, hidden_size, bias=False):
+    
+    def __init__(self, n_observations, n_actions, hidden_layers=1, hidden_sizes=(64,32), hidden_activation='relu', final_activation=None, frame_stack=1, bias=True, discrete=False):
         super().__init__()
+
+        if discrete:
+            action_size = 1
+        else:
+            action_size = n_actions
+
+        self.layers = create_layers( 
+            n_observations + action_size, 
+            1, 
+            hidden_layers=hidden_layers,
+            hidden_sizes=hidden_sizes,
+            hidden_activation=hidden_activation, 
+            final_activation=final_activation,
+            frame_stack=frame_stack,
+            bias=bias
+        )
+    
+    def forward(self, state, action):
+        x = torch.cat([state, action], dim=-1)
+        for layer in self.layers:
+            x = layer(x)
+        return x
 
 class DeterministicPolicy(nn.Module):
     def __init__(self, n_observations, n_actions, hidden_layers=1, hidden_sizes=(64,32), hidden_activation='relu', final_activation=None, frame_stack=1, bias=True):

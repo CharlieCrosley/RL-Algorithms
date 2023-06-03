@@ -1,6 +1,6 @@
 """
 
-Proximal Policy Optimization (PPO)
+Proximal Policy Optimization (PPO) implementation.
 
 PPO-Clip variant of PPO.
 
@@ -90,6 +90,7 @@ class PPO(BaseModel):
             step_num += len(actions)
             num_episodes = max(terminal.shape[0] - torch.count_nonzero(terminal), 1)
             mean_reward = sum(rewards) / num_episodes
+            #mean_reward = sum(rewards) / num_episodes
             print(f"""epoch {epoch} / step {step_num}: policy loss {policy_loss} - value loss {value_loss:.4f} - mean reward {mean_reward:.4f} - time {dt*1000:.2f}ms""")
             
             if epoch > 0 and epoch % self.eval_interval == 0:

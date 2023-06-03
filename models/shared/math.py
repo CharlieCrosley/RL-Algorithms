@@ -61,11 +61,10 @@ def estimate_advantage_with_value_fn(states, rewards, terminal, value_fn, discou
     advantages = discounted_reward - values
     return advantages, returns
 
-def kl_divergence_discrete(p, q):
-    p = p.detach()
+def kl_divergence_from_probs(p, q):
     return (p * (p.log() - q.log())).sum(-1)
 
-def kl_divergence_continuous(mu_old, std_old, mu_new, std_new):
+def kl_divergence(mu_old, std_old, mu_new, std_new):
     kl = (std_new.log() - std_old.log()) + (std_old.pow(2) + (mu_old - mu_new).pow(2)) / (2.0 * std_new.pow(2)) - 0.5
     return kl.sum(1, keepdim=True)
 
@@ -81,13 +80,13 @@ def compute_surrogate_loss_and_kl(policy, states, actions, advantages, old_log_p
             # because of this we need to clip the probabilities by nudging them away from 0 and 1 by the smallest possible value for the dtype
             dist = torch.distributions.utils.clamp_probs(dist) 
             probs = torch.gather(dist, 1, actions.long().unsqueeze(1))
-            kl = None if eval else kl_divergence_discrete(dist.detach(), dist).mean()
+            kl = None if eval else kl_divergence_from_probs(dist.detach(), dist).mean()
             log_probs = probs.log()
         else:
             with ctx:
                 mu_new, log_std_new = policy(states)
             std_new = torch.exp(log_std_new)
-            kl = None if eval else kl_divergence_continuous(mu_new.detach(), std_new.detach(), mu_new, std_new).mean()
+            kl = None if eval else kl_divergence(mu_new.detach(), std_new.detach(), mu_new, std_new).mean()
             log_probs = normal_log_density(actions, mu_new, log_std_new, std_new) if old_log_probs is None else old_log_probs
         
         old_log_probs = log_probs.detach() if old_log_probs is None else old_log_probs

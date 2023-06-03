@@ -13,6 +13,9 @@ def get_model_obj(model_name):
         case 'ppo':
             from models import PPO
             return PPO.PPO
+        case 'dqn':
+            from models import DQN
+            return DQN.DQN
     raise ValueError(f'Unknown model name: {model_name}')
 
 """ def init_weights(m):

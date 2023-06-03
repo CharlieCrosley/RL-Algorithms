@@ -1,6 +1,6 @@
 """ 
 
-Trust Region Policy Optimization (TRPO) 
+Trust Region Policy Optimization (TRPO) implementation.
 
 Helpful resources:
 - https://spinningup.openai.com/en/latest/algorithms/trpo.html
@@ -18,7 +18,7 @@ import wandb
 from models.shared.base_model import BaseModel
 from models.shared.utils import apply_parameter_update, apply_parameter_update, get_flat_params_from
 from models.shared.data import Transition
-from models.shared.core import Value, DeterministicPolicy, StochasticPolicy, flat_grad
+from models.shared.core import Value, StochasticPolicy, flat_grad
 from models.shared.math import conjugate_gradient, compute_surrogate_loss_and_kl, estimate_advantage_with_value_fn
 
 
