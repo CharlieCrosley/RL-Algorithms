@@ -14,11 +14,11 @@ config = DQNConfig(
     policy_lr=1e-4,
     bias=True,
     compile=False,
-    eval_interval=60,
+    eval_interval=15,
     n_eval_epochs = 3,
     device='cuda', # cpu faster for small models
     batch_size=128,
-    warmpup_steps=1000,
+    warmup_steps=1000,
     log_interval=5,
     memory_size=10000,
 )

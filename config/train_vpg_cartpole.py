@@ -13,6 +13,5 @@ config = VPGConfig(
     policy_lr=4e-3,
     value_lr=4e-3,
     compile=False,
-    n_epochs=100,
     device='cpu'
 )

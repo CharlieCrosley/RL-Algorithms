@@ -24,9 +24,10 @@ class BaseConfig:
     wandb_log: bool = False
     wandb_project: str = "project"
     wandb_run_name: str = "run_" + str(time.time())
-    n_epochs: int = 1000
+    max_steps = 1e6
     update_steps: int = 80
     max_ep_len: int = 1000
+    batch_size: int = 100
 
 @dataclass
 class VPGConfig(BaseConfig):

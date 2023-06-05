@@ -30,7 +30,6 @@ class BaseModel(torch.nn.Module, ABC):
         self.n_eval_epochs = config.n_eval_epochs
         self.eval_interval = config.eval_interval
         self.epoch = 1
-        self.n_epochs = config.n_epochs
 
         self.best_mean_reward = -float('inf')
         
@@ -142,7 +141,6 @@ class BaseModel(torch.nn.Module, ABC):
                         obj = self
                         var_path = param.split('.')
                         for var in var_path[:-1]:
-                            print(var)
                             obj = obj.__dict__[var]
                         obj.__dict__[var_path[-1]] = value
             else:

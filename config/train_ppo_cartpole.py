@@ -20,6 +20,5 @@ config = PPOConfig(
     eval_interval=10,
     n_eval_epochs = 3,
     device='cpu', # cpu faster for small models
-    clip_ratio = 0.2,
-    batch_size=4000
+    clip_ratio = 0.2
 )

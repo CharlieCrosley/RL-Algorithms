@@ -54,7 +54,7 @@ class TRPO(BaseModel):
             
     def train_model(self):
         step_num = 0
-        for epoch in range(self.epoch, self.n_epochs):
+        while step_num < self.config.max_steps:
             t0 = time.time()
             transitions = self.sample_batch_from_env()
             
@@ -112,11 +112,11 @@ class TRPO(BaseModel):
             # terminal values of zero indicate end of episode
             num_episodes = max(terminal.shape[0] - torch.count_nonzero(terminal), 1)
             mean_reward = sum(rewards) / num_episodes
-            print(f"""epoch {epoch+1} / step {step_num}: policy loss {policy_loss} - value loss {value_fn_loss:.4f} - mean reward {mean_reward:.4f} - time {dt*1000:.2f}ms""")
+            print(f"""epoch {self.epoch} / step {step_num}: policy loss {policy_loss} - value loss {value_fn_loss:.4f} - mean reward {mean_reward:.4f} - time {dt*1000:.2f}ms""")
 
             if self.config.wandb_log:
                 wandb.log({
-                    "epoch": epoch,
+                    "epoch": self.epoch,
                     "iter": step_num,
                     "policy_loss": policy_loss,
                     "value_loss": value_fn_loss,
@@ -126,8 +126,10 @@ class TRPO(BaseModel):
                     "advantages": advantages,
                     })
 
-            if epoch > 0 and epoch % self.eval_interval == 0:
-                self.eval_model(epoch, step_num)
+            if self.epoch > 0 and self.epoch % self.eval_interval == 0:
+                self.eval_model(self.epoch, step_num)
+
+            self.epoch += 1
 
     @torch.no_grad()
     def eval_model(self, train_epoch=0, train_step_num=0, save=True):

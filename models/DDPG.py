@@ -5,9 +5,11 @@ Deep Deterministic Policy Gradient (DDPG) implementation.
 """
 
 import time
+import numpy as np
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
+import wandb
 from models.shared.base_model import BaseModel
 from models.shared.data import Transition, ReplayMemory
 from models.shared.core import DeterministicPolicy, ActionValue, polyak_update
@@ -100,7 +102,7 @@ class DDPG(BaseModel):
     
     def train_model(self):     
         step_num = 0
-        while self.epoch < (self.n_epochs + 1): # epoch starts from 1
+        while step_num < self.config.max_steps: # epoch starts from 1
             t0 = time.time()
             rewards = []
             terminal = []
@@ -150,7 +152,7 @@ class DDPG(BaseModel):
             mean_reward = sum(rewards) / num_episodes
             if self.epoch % self.config.log_interval == 0:
                 print(f"""epoch {self.epoch} / step {step_num}: policy loss {policy_loss} - q loss {q_loss} - mean episode reward {mean_reward:.4f} - time {dt*1000:.2f}ms""")
-            
+
             if self.epoch > 0 and self.epoch % self.eval_interval == 0:
                 self.eval()
                 self.eval_model(self.epoch, step_num)
@@ -166,6 +168,7 @@ class DDPG(BaseModel):
         print("="*100)
         
         eval_step_num = 0
+        total_rewards = []
         for epoch in range(self.n_eval_epochs):
             t0 = time.time()
             done = False
@@ -190,7 +193,7 @@ class DDPG(BaseModel):
                 eval_step_num += 1
                 if done:
                     break
-            
+
             batch = Transition(*zip(*transitions))
             states = torch.stack(batch.state).to(self.device, torch.float32)
             actions = torch.stack(batch.action).to(self.device, torch.long)
@@ -207,6 +210,7 @@ class DDPG(BaseModel):
             t0 = t1
 
             rewards = sum(rewards)
+            total_rewards.append(rewards)
             print(f"""eval epoch {epoch+1} / step {eval_step_num}: policy loss {policy_loss} - q loss {q_loss} - episode reward {rewards:.4f} - time {dt*1000:.2f}ms""")
 
             if save and rewards >= self.best_mean_reward and policy_loss < self.best_policy_loss:
@@ -214,6 +218,12 @@ class DDPG(BaseModel):
                 self.best_mean_reward = rewards
                 self.best_policy_loss = policy_loss
                 self.save(train_epoch+1, train_step_num+1)
+
+        if self.config.wandb_log:
+            wandb.log({
+                "iter": train_step_num,
+                "rewards": np.mean(total_rewards),
+                })
         print("="*100)
         print("Finished Testing!".center(100))
         print("="*100)

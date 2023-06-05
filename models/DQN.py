@@ -7,9 +7,11 @@ Deep Q-Network (DQN) implementation.
 import math
 import random
 import time
+import numpy as np
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
+import wandb
 from models.shared.base_model import BaseModel
 from models.shared.data import Transition, ReplayMemory
 from models.shared.core import DeterministicPolicy
@@ -89,7 +91,7 @@ class DQN(BaseModel):
     
     def train_model(self):     
         step_num = 0
-        while self.epoch < (self.n_epochs + 1): # epoch starts from 1
+        while step_num < self.config.max_steps: 
             t0 = time.time()
             done = False
             rewards = []
@@ -143,6 +145,7 @@ class DQN(BaseModel):
         print("="*100)
         
         eval_step_num = 0
+        total_rewards = []
         for epoch in range(self.n_eval_epochs):
             t0 = time.time()
             done = False
@@ -167,12 +170,12 @@ class DQN(BaseModel):
 
             batch = Transition(*zip(*transitions))
             states = torch.stack(batch.state).to(self.device, torch.float32)
-            actions = torch.stack(batch.action).to(self.device, torch.long)
+            actions = torch.stack(batch.action).to(self.device, torch.long).view(-1, 1)
             next_states = torch.stack(batch.next_state).to(self.device, torch.float32)
             rewards = torch.tensor(batch.reward).to(self.device, torch.float32)
             terminal = torch.tensor(batch.terminal).to(self.device)
 
-            loss = self.compute_loss(states).item()
+            loss = self.compute_loss(states, actions, next_states, rewards, terminal).item()
             
             # timing and logging
             t1 = time.time()
@@ -180,13 +183,21 @@ class DQN(BaseModel):
             t0 = t1
 
             rewards = sum(rewards)
+            total_rewards.append(rewards)
             print(f"""eval epoch {epoch} / step {eval_step_num}: loss {loss} - episode reward {rewards:.4f} - time {dt*1000:.2f}ms""")
 
-            if save and rewards >= self.best_mean_reward and loss < self.best_loss:
+            if save and rewards >= self.best_mean_reward and loss > self.best_loss:
                 print("Saving model...")
                 self.best_mean_reward = rewards
                 self.best_loss = loss
                 self.save(train_epoch+1, train_step_num+1)
+        
+        if self.config.wandb_log:
+            wandb.log({
+                "iter": train_step_num,
+                "rewards": np.mean(total_rewards),
+                })
+        
         print("="*100)
         print("Finished Testing!".center(100))
         print("="*100)

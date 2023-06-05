@@ -8,6 +8,7 @@ import time
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
+import wandb
 from models.shared.base_model import BaseModel
 from models.shared.data import Transition
 from models.shared.core import StochasticPolicy, Value
@@ -51,7 +52,7 @@ class VPG(BaseModel):
             
     def train_model(self):
         step_num = 0
-        for epoch in range(self.epoch, self.n_epochs):
+        while step_num < self.config.max_steps:
             t0 = time.time()
 
             transitions = self.sample_batch_from_env()
@@ -81,12 +82,14 @@ class VPG(BaseModel):
             step_num += len(actions)
             num_episodes = max(terminal.shape[0] - torch.count_nonzero(terminal), 1)
             mean_reward = sum(rewards) / num_episodes
-            print(f"""epoch {epoch} / step {step_num}: policy loss {policy_loss:.8f} - value loss {value_loss:.4f} - mean reward {mean_reward:.4f} - time {dt*1000:.2f}ms""")
+            print(f"""epoch {self.epoch} / step {step_num}: policy loss {policy_loss:.8f} - value loss {value_loss:.4f} - mean reward {mean_reward:.4f} - time {dt*1000:.2f}ms""")
 
-            if epoch > 0 and epoch % self.eval_interval == 0:
+            if self.epoch > 0 and self.epoch % self.eval_interval == 0:
                 self.eval()
-                self.eval_model(epoch, step_num)
+                self.eval_model(self.epoch, step_num)
                 self.train()
+            
+            self.epoch += 1
             
 
     @torch.no_grad()
@@ -130,6 +133,17 @@ class VPG(BaseModel):
                 self.best_policy_loss = policy_loss
                 self.best_value_loss = value_loss
                 self.save(train_epoch+1, train_step_num+1)
+                
+            if self.config.wandb_log:
+                wandb.log({
+                    "epoch": epoch,
+                    "iter": step_num,
+                    "policy_loss": policy_loss,
+                    "value_loss": value_loss,
+                    "rewards": rewards,
+                    "time_per_epoch": round(dt*1000, 2),
+                    "advantages": advantages,
+                    })
         print("="*100)
         print("Finished Testing!".center(100))
         print("="*100)
