@@ -16,18 +16,17 @@ def get_model_obj(model_name):
         case 'dqn':
             from models import DQN
             return DQN.DQN
+        case 'ddpg':
+            from models import DDPG
+            return DDPG.DDPG
     raise ValueError(f'Unknown model name: {model_name}')
-
-""" def init_weights(m):
-    if isinstance(m, torch.nn.Linear):
-        torch.nn.init.xavier_uniform_(m.weight)
-        m.bias.data.fill_(0.01) """
 
 def init_weights(module):
     if isinstance(module, nn.Linear):
         torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
         if module.bias is not None:
             torch.nn.init.zeros_(module.bias)
+            
 def init_weights2(module):
     if isinstance(module, nn.Linear):
         torch.nn.init.kaiming_normal_(module.weight)

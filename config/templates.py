@@ -26,6 +26,7 @@ class BaseConfig:
     wandb_run_name: str = "run_" + str(time.time())
     n_epochs: int = 1000
     update_steps: int = 80
+    max_ep_len: int = 1000
 
 @dataclass
 class VPGConfig(BaseConfig):
@@ -61,7 +62,18 @@ class DQNConfig(BaseConfig):
     tau: float = 0.005
     batch_size: int = 32
     memory_size: int = 100000
-    warmpup_steps: int = 1000
+    warmup_steps: int = 1000
     eps_start: float = 0.9
     eps_end: float = 0.05
     eps_decay: float = 1000
+
+@dataclass
+class DDPGConfig(DQNConfig):
+    algorithm: str = "ddpg"
+    q_lr: float = 0.001
+    update_every: int = 50
+    update_after: int = 1000
+    steps_per_epoch: int = 4000
+    q_hidden_n_layers: int = 1
+    q_hidden_sizes: tuple[int, ...] | list[int] = (64, 32) 
+    gaussian_noise_std: float = 0.1

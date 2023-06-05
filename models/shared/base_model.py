@@ -29,7 +29,7 @@ class BaseModel(torch.nn.Module, ABC):
         self.batch_size = config.batch_size
         self.n_eval_epochs = config.n_eval_epochs
         self.eval_interval = config.eval_interval
-        self.epoch = 0
+        self.epoch = 1
         self.n_epochs = config.n_epochs
 
         self.best_mean_reward = -float('inf')
@@ -82,6 +82,7 @@ class BaseModel(torch.nn.Module, ABC):
         state, _ = self.env.reset()
         # sample a batch of trajectories
         for t in range(self.config.steps_per_epoch):
+            self.env.render()
             # Runs the forward pass with autocasting.
             with self.ctx:
                 action = self.get_action(state)
@@ -141,6 +142,7 @@ class BaseModel(torch.nn.Module, ABC):
                         obj = self
                         var_path = param.split('.')
                         for var in var_path[:-1]:
+                            print(var)
                             obj = obj.__dict__[var]
                         obj.__dict__[var_path[-1]] = value
             else:

@@ -20,6 +20,7 @@ class Value(nn.Module):
             frame_stack=frame_stack,
             bias=bias
         )
+        
     
     def forward(self, state):
         x = state
@@ -37,8 +38,14 @@ class ActionValue(nn.Module):
         else:
             action_size = n_actions
 
+        self.hidden_layers = hidden_layers
+        if hidden_layers > 0:
+            # Add action_size to first hidden layer
+            hidden_sizes = hidden_sizes[:1] + (hidden_sizes[1] + action_size,) + hidden_sizes[2:]
+            #print(hidden_sizes)
+
         self.layers = create_layers( 
-            n_observations + action_size, 
+            n_observations + action_size,
             1, 
             hidden_layers=hidden_layers,
             hidden_sizes=hidden_sizes,
@@ -47,12 +54,36 @@ class ActionValue(nn.Module):
             frame_stack=frame_stack,
             bias=bias
         )
+        #print(self.layers)
     
     def forward(self, state, action):
-        x = torch.cat([state, action], dim=-1)
-        for layer in self.layers:
+        x = torch.cat([state, action], dim=1)
+        #x = state
+        for i, layer in enumerate(self.layers):
+            """ print(i, layer)
+            if i == 1 and self.hidden_layers > 0:
+                x = torch.cat([x, action], dim=1)
+                print(x.shape) """
             x = layer(x)
         return x
+
+""" class ActionValue(nn.Module):
+    
+    def __init__(self, n_observations, n_actions, hidden_layers=1, hidden_sizes=(64,32), hidden_activation='relu', final_activation=None, frame_stack=1, bias=True, discrete=False):
+        super().__init__()
+        if discrete:
+            action_size = 1
+        else:
+            action_size = n_actions
+            
+        self.l1 = nn.Linear(n_observations, 400)
+        self.l2 = nn.Linear(400 + action_size, 300)
+        self.l3 = nn.Linear(300, 1)
+    
+    def forward(self, state, action):
+        q = F.relu(self.l1(state))
+        q = F.relu(self.l2(torch.cat([q, action], 1)))
+        return self.l3(q) """
 
 class DeterministicPolicy(nn.Module):
     def __init__(self, n_observations, n_actions, hidden_layers=1, hidden_sizes=(64,32), hidden_activation='relu', final_activation=None, frame_stack=1, bias=True):
@@ -144,3 +175,12 @@ def flat_grad(x, parameters, retain_graph=False, create_graph=False):
     g = torch.autograd.grad(x, parameters, retain_graph=retain_graph, create_graph=create_graph)
     g = torch.cat([t.view(-1) for t in g])
     return g
+
+def polyak_update(policy, target, tau=0.005):
+    """ Polyak update of the parameters """
+    
+    state_dict = policy.state_dict()
+    target_state_dict = target.state_dict()
+    for key in state_dict:
+        target_state_dict[key] = state_dict[key]*tau + target_state_dict[key]*(1-tau)
+    target.load_state_dict(target_state_dict)

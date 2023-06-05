@@ -34,8 +34,19 @@ class DQN(BaseModel):
 
         self.memory = ReplayMemory(self.config.memory_size)
         
-        self.best_value_loss = -float('inf')
+        self.best_loss = -float('inf')
     
+    def compute_loss(self, states, actions, next_states, rewards, terminal):
+        state_action_values = self.policy(states).gather(1, actions)
+
+        with torch.no_grad():
+            next_state_values = self.target_policy(next_states).max(1)[0]
+      
+        # Compute the expected Q values
+        expected_state_action_values = rewards + self.config.gamma * next_state_values * terminal
+
+        policy_loss = F.smooth_l1_loss(state_action_values.view(-1), expected_state_action_values)
+        return policy_loss
 
     def optimize(self):
         transitions = self.memory.sample(self.config.batch_size)
@@ -47,21 +58,19 @@ class DQN(BaseModel):
         rewards = torch.tensor(batch.reward).to(self.device, torch.float32)
         terminal = torch.tensor(batch.terminal).to(self.device)
 
-        state_action_values = self.policy(states).gather(1, actions)
-
-        with torch.no_grad():
-            next_state_values = self.target_policy(next_states).max(1)[0]
-      
-        # Compute the expected Q values
-        expected_state_action_values = rewards + self.config.gamma * next_state_values * terminal
-
-        policy_loss = F.smooth_l1_loss(state_action_values.view(-1), expected_state_action_values)
+        policy_loss = self.compute_loss(states, actions, next_states, rewards, terminal)
   
         self.policy_optimizer.zero_grad()
         policy_loss.backward()
         # gradient clipping so that it doesnt blow up
         torch.nn.utils.clip_grad_value_(self.policy.parameters(), 100)
         self.policy_optimizer.step()
+
+        target_net_state_dict = self.target_policy.state_dict()
+        policy_net_state_dict = self.policy.state_dict()
+        for key in policy_net_state_dict:
+            target_net_state_dict[key] = policy_net_state_dict[key]*self.config.tau + target_net_state_dict[key]*(1-self.config.tau)
+        self.target_policy.load_state_dict(target_net_state_dict)
 
 
         return policy_loss.item()
@@ -80,7 +89,7 @@ class DQN(BaseModel):
     
     def train_model(self):     
         step_num = 0
-        for epoch in range(max(1, self.epoch), self.n_epochs):
+        while self.epoch < (self.n_epochs + 1): # epoch starts from 1
             t0 = time.time()
             done = False
             rewards = []
@@ -99,21 +108,15 @@ class DQN(BaseModel):
                 state = next_state
 
                 step_num += 1
-                if self.config.warmpup_steps >= step_num:
+                if self.config.warmup_steps >= step_num:
                     continue
 
                 rewards.append(reward)
 
                 policy_loss = self.optimize()
 
-                target_net_state_dict = self.target_policy.state_dict()
-                policy_net_state_dict = self.policy.state_dict()
-                for key in policy_net_state_dict:
-                    target_net_state_dict[key] = policy_net_state_dict[key]*self.config.tau + target_net_state_dict[key]*(1-self.config.tau)
-                self.target_policy.load_state_dict(target_net_state_dict)
-
             # dont log or eval during warmpup
-            if self.config.warmpup_steps >= step_num:
+            if self.config.warmup_steps >= step_num:
                     continue
             
             # timing and logging
@@ -122,13 +125,15 @@ class DQN(BaseModel):
             t0 = t1
 
             ep_reward = sum(rewards)
-            if epoch % self.config.log_interval == 0:
-                print(f"""epoch {epoch} / step {step_num}: policy loss {policy_loss} - episode reward {ep_reward:.4f} - time {dt*1000:.2f}ms""")
+            if self.epoch % self.config.log_interval == 0:
+                print(f"""epoch {self.epoch} / step {step_num}: policy loss {policy_loss} - episode reward {ep_reward:.4f} - time {dt*1000:.2f}ms""")
             
-            if epoch > 0 and epoch % self.eval_interval == 0:
+            if self.epoch > 0 and self.epoch % self.eval_interval == 0:
                 self.eval()
-                self.eval_model(epoch, step_num)
+                self.eval_model(self.epoch, step_num)
                 self.train()
+            
+            self.epoch += 1
             
 
     @torch.no_grad()
@@ -142,6 +147,7 @@ class DQN(BaseModel):
             t0 = time.time()
             done = False
             rewards = []
+            transitions = []
             state, _ = self.env.reset()
             while not done:
                 with self.ctx:
@@ -150,9 +156,23 @@ class DQN(BaseModel):
                 done = terminated
 
                 rewards.append(reward)
+                transitions.append(Transition(torch.from_numpy(state), 
+                                torch.tensor(action),
+                                torch.from_numpy(next_state),
+                                reward, 
+                                float(not(done))))
                 
                 state = next_state
                 eval_step_num += 1
+
+            batch = Transition(*zip(*transitions))
+            states = torch.stack(batch.state).to(self.device, torch.float32)
+            actions = torch.stack(batch.action).to(self.device, torch.long)
+            next_states = torch.stack(batch.next_state).to(self.device, torch.float32)
+            rewards = torch.tensor(batch.reward).to(self.device, torch.float32)
+            terminal = torch.tensor(batch.terminal).to(self.device)
+
+            loss = self.compute_loss(states).item()
             
             # timing and logging
             t1 = time.time()
@@ -160,11 +180,12 @@ class DQN(BaseModel):
             t0 = t1
 
             rewards = sum(rewards)
-            print(f"""eval epoch {epoch} / step {eval_step_num}: episode reward {rewards:.4f} - time {dt*1000:.2f}ms""")
+            print(f"""eval epoch {epoch} / step {eval_step_num}: loss {loss} - episode reward {rewards:.4f} - time {dt*1000:.2f}ms""")
 
-            if save and rewards >= self.best_mean_reward:
+            if save and rewards >= self.best_mean_reward and loss < self.best_loss:
                 print("Saving model...")
                 self.best_mean_reward = rewards
+                self.best_loss = loss
                 self.save(train_epoch+1, train_step_num+1)
         print("="*100)
         print("Finished Testing!".center(100))
@@ -178,6 +199,7 @@ class DQN(BaseModel):
                     },
                     'config': self.config,
                     'best_mean_reward': self.best_mean_reward,
+                    'best_loss': self.best_loss,
                     'epoch': epoch,
                     'step_num': step_num,})
         

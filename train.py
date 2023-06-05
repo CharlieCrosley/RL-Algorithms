@@ -8,7 +8,7 @@ from configurator import get_config
 
 config = get_config()
 
-env = gym.make(config.env_name) #, render_mode="human"
+env = gym.make(config.env_name)
 env = NormalizeObservation(env) # very important!
 #env = FrameStack(env, num_stack=1)
 
