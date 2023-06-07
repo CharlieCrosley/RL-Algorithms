@@ -77,4 +77,11 @@ class DDPGConfig(DQNConfig):
     steps_per_epoch: int = 4000
     q_hidden_n_layers: int = 1
     q_hidden_sizes: tuple[int, ...] | list[int] = (64, 32) 
-    gaussian_noise_std: float = 0.1
+    policy_gaussian_noise_std: float = 0.1
+
+@dataclass
+class TD3Config(DDPGConfig):
+    algorithm: str = "td3"
+    target_gaussian_noise_std: float = 0.2
+    noise_clip: float = 0.5
+    policy_delay: int = 2

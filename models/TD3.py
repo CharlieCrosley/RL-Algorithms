@@ -1,6 +1,6 @@
 """
 
-Deep Deterministic Policy Gradient (DDPG) implementation.
+Twin Delayed Deep Deterministic Policy Gradients (TD3) implementation.
 
 """
 
@@ -12,10 +12,10 @@ import torch.optim as optim
 import wandb
 from models.shared.base_model import BaseModel
 from models.shared.data import Transition, ReplayMemory
-from models.shared.core import DeterministicPolicy, ActionValue, polyak_update
+from models.shared.core import DeterministicPolicy, DoubleQNetwork, polyak_update
 
 
-class DDPG(BaseModel):
+class TD3(BaseModel):
 
     def __init__(self, config, env):
         super().__init__(config, env)
@@ -28,8 +28,8 @@ class DDPG(BaseModel):
                                         hidden_sizes=self.config.policy_hidden_sizes, hidden_activation='relu', final_activation='tanh',
                                         frame_stack=self.config.frame_stack, bias=self.config.bias)
         
-        self.q = ActionValue(self.n_observations, self.n_actions, hidden_layers=config.q_hidden_n_layers, hidden_sizes=config.q_hidden_sizes)
-        self.target_q = ActionValue(self.n_observations, self.n_actions, hidden_layers=config.q_hidden_n_layers, hidden_sizes=config.q_hidden_sizes)
+        self.q = DoubleQNetwork(self.n_observations, self.n_actions, hidden_layers=config.q_hidden_n_layers, hidden_sizes=config.q_hidden_sizes)
+        self.target_q = DoubleQNetwork(self.n_observations, self.n_actions, hidden_layers=config.q_hidden_n_layers, hidden_sizes=config.q_hidden_sizes)
         
         self.target_policy.load_state_dict(self.policy.state_dict())
         self.target_q.load_state_dict(self.q.state_dict())
@@ -42,22 +42,32 @@ class DDPG(BaseModel):
         self.best_policy_loss = float('inf')
         self.action_high = torch.tensor(self.env.action_space.high).to(self.device)
         self.action_low = torch.tensor(self.env.action_space.low).to(self.device)
+
     
-    def get_q_loss(self, states, actions, next_states, rewards, terminal):
+    def get_q_loss(self, states, actions, next_states, rewards, terminal, eval=False):
         with torch.no_grad():
-            target_actions = self.target_policy(next_states)
-            target_q_value = self.target_q(next_states, target_actions).view(-1)
+            if eval:
+                # No noise during evaluation
+                target_action_noise = 0
+            else:
+                noise = torch.distributions.Normal(0, self.config.target_gaussian_noise_std * self.action_high).sample()
+                target_action_noise = torch.clamp(noise, -self.config.noise_clip, self.config.noise_clip)
+            target_actions = torch.clamp(self.target_policy(next_states) + target_action_noise, self.action_low, self.action_high)
+            target_q1, target_q2 = self.target_q(next_states, target_actions)
+            target_q_value = torch.min(target_q1, target_q2).view(-1)
             # Compute the expected Q values
             target = rewards + self.config.gamma * target_q_value * terminal
 
-        q_value = self.q(states, actions)
-        q_loss = F.mse_loss(q_value.view(-1), target)
+        q1_value, q2_value = self.q(states, actions)
+        q_loss = F.mse_loss(q1_value.view(-1), target) + F.mse_loss(q2_value.view(-1), target)
+
+
         return q_loss
     
     def get_policy_loss(self, states):
-        return -self.q(states, self.policy(states)).mean()
+        return -self.q.Q1(states, self.policy(states)).mean() # we only use q1 for policy loss
 
-    def optimize(self, transitions):
+    def optimize(self, transitions, step_num):
         batch = Transition(*zip(*transitions))
    
         states = torch.stack(batch.state).to(self.device, torch.float32)
@@ -67,21 +77,25 @@ class DDPG(BaseModel):
         terminal = torch.tensor(batch.terminal).to(self.device)
 
         q_loss = self.get_q_loss(states, actions, next_states, rewards, terminal)
+        # q parameters update
         self.q_optimizer.zero_grad()
         q_loss.backward()
         # gradient clipping so that it doesnt blow up
         torch.nn.utils.clip_grad_value_(self.q.parameters(), 100)
         self.q_optimizer.step()
 
-        policy_loss = self.get_policy_loss(states)
-        self.policy_optimizer.zero_grad()
-        policy_loss.backward()
-        # gradient clipping so that it doesnt blow up
-        torch.nn.utils.clip_grad_value_(self.policy.parameters(), 100)
-        self.policy_optimizer.step()
+        policy_loss = torch.empty(1)
+        if step_num % self.config.policy_delay == 0:
+            # policy parameters update
+            policy_loss = self.get_policy_loss(states)
+            self.policy_optimizer.zero_grad()
+            policy_loss.backward()
+            # gradient clipping so that it doesnt blow up
+            torch.nn.utils.clip_grad_value_(self.policy.parameters(), 100)
+            self.policy_optimizer.step()
 
-        polyak_update(self.policy, self.target_policy, self.config.tau)
-        polyak_update(self.q, self.target_q, self.config.tau)
+            polyak_update(self.policy, self.target_policy, self.config.tau)
+            polyak_update(self.q, self.target_q, self.config.tau)
 
         return policy_loss.item(), q_loss.item()
     
@@ -136,7 +150,7 @@ class DDPG(BaseModel):
                     
                     if epoch_steps > self.config.update_after and epoch_steps % self.config.update_every == 0:
                         for _ in range(self.config.update_steps):
-                            policy_loss, q_loss = self.optimize(self.memory.sample(self.config.batch_size))
+                            policy_loss, q_loss = self.optimize(self.memory.sample(self.config.batch_size), step_num)
 
             # dont log or eval during warmpup
             if self.config.warmup_steps >= step_num:
@@ -201,7 +215,7 @@ class DDPG(BaseModel):
             rewards = torch.tensor(batch.reward).to(self.device, torch.float32)
             terminal = torch.tensor(batch.terminal).to(self.device)
 
-            q_loss = self.get_q_loss(states, actions, next_states, rewards, terminal)
+            q_loss = self.get_q_loss(states, actions, next_states, rewards, terminal, eval=True)
             policy_loss = self.get_policy_loss(states)
             
             # timing and logging

@@ -19,6 +19,9 @@ def get_model_obj(model_name):
         case 'ddpg':
             from models import DDPG
             return DDPG.DDPG
+        case 'td3':
+            from models import TD3
+            return TD3.TD3
     raise ValueError(f'Unknown model name: {model_name}')
 
 def init_weights(module):

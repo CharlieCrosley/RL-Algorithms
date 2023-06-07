@@ -15,7 +15,7 @@ out_dir = os.path.join(sys.argv[1], f'model.{save_ext[ext_idx]}')
 checkpoint = torch.load(out_dir)
 
 config = checkpoint['config']
-config.n_eval_epochs = 1
+config.n_eval_epochs = 15
 env = gym.make(config.env_name, render_mode="human")
 env = NormalizeObservation(env)
 model_type = get_model_obj(config.algorithm)
