@@ -5,7 +5,7 @@ PyTorch implementations of a variety of reinforcement learning algorithms
 - [Pytorch](https://pytorch.org)
 - pip install numpy
 - pip install gymnasium
-- pip instsall wandb
+- pip install wandb
 
 ## How to run
 ```
